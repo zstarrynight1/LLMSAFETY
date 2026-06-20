@@ -69,14 +69,20 @@ if (typeof module !== 'undefined' && module.exports) {
 
 // Bootstrap chi chay trong moi truong extension that (co chrome.runtime),
 // khong chay khi file duoc require() boi test.
+// WarningInjector la global cung isolated world (injector.js load truoc detector.js
+// trong manifest.json content_scripts.js - cac content script file chia se 1 global scope).
 if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+  const injector = new WarningInjector();
   const detector = new CodeDetector({
     onCodeBlocksFound: (blocks) => {
-      blocks.forEach(({ codeText, context }) => {
-        chrome.runtime.sendMessage({
-          type: 'ANALYZE_CODE_SNIPPET',
-          payload: { codeText, context },
-        });
+      blocks.forEach(({ element, codeText, context }) => {
+        chrome.runtime.sendMessage(
+          { type: 'ANALYZE_CODE_SNIPPET', payload: { codeText, context } },
+          (response) => {
+            if (chrome.runtime.lastError || !response || !response.ok) return;
+            injector.inject(element, response.result);
+          },
+        );
       });
     },
   });
