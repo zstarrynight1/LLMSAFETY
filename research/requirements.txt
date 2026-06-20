@@ -1,0 +1,7 @@
+requests>=2.32
+pytest>=8.0
+
+# Cai them truoc khi chay that label_snippets.py / run_baseline_static.py (chua co tren may dev):
+#   pip install bandit semgrep
+bandit>=1.7
+semgrep>=1.70
