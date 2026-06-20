@@ -177,6 +177,27 @@ describe('resolveProvider', () => {
   });
 });
 
+// So vong await trong chain that su (resolveProvider -> reserveCall qua withQuotaLock ->
+// provider.analyze -> onUsage -> addCost qua withQuotaLock) khong co dinh - dem tick co dinh
+// (vd 2x setImmediate) la flaky. Poll toi khi sendResponse duoc goi thay vi doan so tick.
+function waitForSendResponse(sendResponse, { timeoutMs = 1000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    const check = () => {
+      if (sendResponse.mock.calls.length > 0) {
+        resolve();
+        return;
+      }
+      if (Date.now() - start > timeoutMs) {
+        reject(new Error('waitForSendResponse: timeout cho sendResponse duoc goi'));
+        return;
+      }
+      setImmediate(check);
+    };
+    check();
+  });
+}
+
 describe('chrome.runtime.onMessage wiring (full module bootstrap)', () => {
   let addListenerSpy;
   let registeredListener;
@@ -219,8 +240,7 @@ describe('chrome.runtime.onMessage wiring (full module bootstrap)', () => {
     );
 
     expect(keepChannelOpen).toBe(true);
-    await new Promise((resolve) => setImmediate(resolve));
-    await new Promise((resolve) => setImmediate(resolve));
+    await waitForSendResponse(sendResponse);
 
     expect(sendResponse).toHaveBeenCalledWith(
       expect.objectContaining({ ok: true, result: expect.objectContaining({ vulnerable: expect.any(Boolean) }) }),
@@ -234,8 +254,7 @@ describe('chrome.runtime.onMessage wiring (full module bootstrap)', () => {
     const sendResponse = jest.fn();
     registeredListener({ type: 'ANALYZE_CODE_SNIPPET', payload: { codeText: '', context: {} } }, {}, sendResponse);
 
-    await new Promise((resolve) => setImmediate(resolve));
-    await new Promise((resolve) => setImmediate(resolve));
+    await waitForSendResponse(sendResponse);
 
     expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({ ok: false, error: expect.any(Object) }));
   });
@@ -252,8 +271,7 @@ describe('chrome.runtime.onMessage wiring (full module bootstrap)', () => {
       sendResponse,
     );
 
-    await new Promise((resolve) => setImmediate(resolve));
-    await new Promise((resolve) => setImmediate(resolve));
+    await waitForSendResponse(sendResponse);
 
     expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({ ok: false }));
   });
