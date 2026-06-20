@@ -3,6 +3,7 @@ node_modules/
 *.log
 .DS_Store
 research/data-collection/raw-data/
+research/evaluation/results/
 .venv/
 __pycache__/
 *.pyc

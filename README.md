@@ -73,6 +73,39 @@ Trước khi crawl **full dataset** (không giới hạn `--limit`), xác nhận
 đã cài Bandit/Semgrep, số lượng snippet target, và tuân thủ phạm vi ngôn ngữ đã chốt
 (Python + JavaScript).
 
+## Research — chạy 4 baseline đánh giá (RESEARCH_PLAN.md mục 4.1)
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...   # chỉ cần khi KHÔNG dùng --dry-run
+
+# Baseline 1: static analyzer thuần (Bandit/Semgrep), không LLM
+python research/evaluation/run_baseline_static.py \
+  --input research/data-collection/raw-data/python.jsonl \
+  --output research/evaluation/results/baseline_static.jsonl
+
+# Baseline 3: LLM zero-shot, không context (--dry-run để test trước, không tốn phí/không cần key)
+python research/evaluation/run_llm_naive.py \
+  --input research/data-collection/raw-data/python.jsonl \
+  --output research/evaluation/results/baseline_naive.jsonl \
+  --dry-run
+
+# Pipeline đề xuất: heuristic + LLM-detector (context-aware) + LLM-judge (mặc định bật)
+python research/evaluation/run_pipeline.py \
+  --input research/data-collection/raw-data/python.jsonl \
+  --output research/evaluation/results/pipeline.jsonl \
+  --dry-run
+# --no-judge: tắt bước 3 (LLM-as-judge) để chạy ablation 2 bước so sánh
+```
+
+Bỏ `--dry-run` để gọi API thật: script sẽ in **chi phí ước tính** và hỏi xác nhận trước khi
+chạy nếu dataset >100 snippet (theo coding-rules.md mục 4.4 — không tự động chạy ngầm).
+Baseline 2 (rule-based kiểu Verdi et al. 2022) **không implement code** — chỉ discuss định
+tính trong bài báo (RESEARCH_PLAN.md mục 4.1 cho phép, theo quyết định của user).
+
+Kết quả mỗi baseline là 1 file `.jsonl` (mỗi dòng = 1 snippet). Dùng `research/evaluation/metrics.py`
+(hàm `summarize()`) để tính Precision/Recall/F1/FPR/chi phí/độ trễ — cần tự nối kết quả với nhãn
+ground-truth (`label_human` từ `label_snippets.py`) theo `question_id` trước khi gọi `summarize()`.
+
 ## Lưu ý bảo mật
 
 - Không bao giờ commit `.env` hoặc bất kỳ file nào chứa API key thật.
