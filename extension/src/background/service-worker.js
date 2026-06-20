@@ -25,16 +25,10 @@ const Modules = (() => {
   };
 })();
 
-const { formatErrorForLog, APIRateLimitError } = Modules.Utils;
+const { formatErrorForLog, APIRateLimitError, getTodayKey } = Modules.Utils;
 const { MAX_DAILY_API_CALLS, MAX_DAILY_COST_USD, DEBUG_MODE } = Modules.Constants;
 const { CacheStore } = Modules.Cache;
 const { LLMClient, MockProvider } = Modules.LLMClientModule;
-
-const DAILY_QUOTA_KEY_PREFIX = 'dailyQuota:';
-
-function getTodayKey(date = new Date()) {
-  return DAILY_QUOTA_KEY_PREFIX + date.toISOString().slice(0, 10); // YYYY-MM-DD theo UTC
-}
 
 class DailyQuotaTracker {
   constructor({

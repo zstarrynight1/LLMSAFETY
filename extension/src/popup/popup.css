@@ -1,0 +1,33 @@
+body {
+  width: 280px;
+  font-family: sans-serif;
+  font-size: 13px;
+  padding: 12px;
+  margin: 0;
+}
+
+h1 {
+  font-size: 14px;
+  margin: 0 0 8px;
+}
+
+dl {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 8px;
+  margin: 8px 0 0;
+}
+
+dt {
+  color: #555;
+}
+
+dd {
+  margin: 0;
+  font-weight: 600;
+  text-align: right;
+}
+
+button {
+  margin-top: 8px;
+}

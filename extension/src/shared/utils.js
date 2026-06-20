@@ -50,6 +50,14 @@ class SchemaValidationError extends Error {
   }
 }
 
+// Dung chung boi service-worker.js (ghi quota) va popup.js (doc quota hom nay)
+// de ca hai luon doc/ghi cung 1 storage key cho cung 1 ngay.
+const DAILY_QUOTA_KEY_PREFIX = 'dailyQuota:';
+
+function getTodayKey(date = new Date()) {
+  return DAILY_QUOTA_KEY_PREFIX + date.toISOString().slice(0, 10); // YYYY-MM-DD theo UTC
+}
+
 const utilsExports = {
   sha256Hash,
   truncateText,
@@ -58,6 +66,8 @@ const utilsExports = {
   APITimeoutError,
   APIRateLimitError,
   SchemaValidationError,
+  DAILY_QUOTA_KEY_PREFIX,
+  getTodayKey,
 };
 
 if (typeof module !== 'undefined' && module.exports) {

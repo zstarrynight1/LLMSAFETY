@@ -6,6 +6,8 @@ const {
   APITimeoutError,
   APIRateLimitError,
   SchemaValidationError,
+  getTodayKey,
+  DAILY_QUOTA_KEY_PREFIX,
 } = require('../../extension/src/shared/utils');
 
 describe('sha256Hash', () => {
@@ -47,6 +49,12 @@ describe('formatErrorForLog', () => {
       message: 'bad input',
       context: { snippetLength: 42 },
     });
+  });
+});
+
+describe('getTodayKey', () => {
+  test('builds a UTC-date key under DAILY_QUOTA_KEY_PREFIX, shared by service-worker and popup', () => {
+    expect(getTodayKey(new Date('2026-06-20T23:59:59Z'))).toBe(`${DAILY_QUOTA_KEY_PREFIX}2026-06-20`);
   });
 });
 
