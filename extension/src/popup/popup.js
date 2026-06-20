@@ -4,14 +4,15 @@
 
 const Modules = (() => {
   if (typeof module !== 'undefined' && module.exports) {
-    return { Utils: require('../shared/utils') };
+    return { Utils: require('../shared/utils'), Constants: require('../shared/constants') };
   }
   // popup.html da load constants.js/utils.js qua <script src> truoc popup.js,
   // 2 file do gan export vao globalThis.SafetyExt.
-  return { Utils: globalThis.SafetyExt };
+  return { Utils: globalThis.SafetyExt, Constants: globalThis.SafetyExt };
 })();
 
 const { getTodayKey } = Modules.Utils;
+const { ANTHROPIC_API_KEY_STORAGE_KEY } = Modules.Constants;
 
 const PRIVACY_ACCEPTED_KEY = 'privacyAccepted';
 const EXTENSION_ENABLED_KEY = 'extensionEnabled';
@@ -52,13 +53,32 @@ class PopupController {
     return (stored && stored[key]) || { calls: 0, costUsd: 0 };
   }
 
+  // Chi tra ve co/khong co key, KHONG bao gio tra ve gia tri that cua key ra UI
+  // (tranh lo key qua console/DOM inspector).
+  async hasAnthropicApiKey() {
+    const stored = await this.storage.get(ANTHROPIC_API_KEY_STORAGE_KEY);
+    return Boolean(stored && stored[ANTHROPIC_API_KEY_STORAGE_KEY]);
+  }
+
+  async setAnthropicApiKey(apiKey) {
+    const trimmed = typeof apiKey === 'string' ? apiKey.trim() : '';
+    if (!trimmed) {
+      await this.storage.remove(ANTHROPIC_API_KEY_STORAGE_KEY);
+      return;
+    }
+    await this.storage.set({ [ANTHROPIC_API_KEY_STORAGE_KEY]: trimmed });
+  }
+
   async getStatus() {
-    const [privacyAccepted, enabled, usage] = await Promise.all([
+    const [privacyAccepted, enabled, usage, hasApiKey] = await Promise.all([
       this.isPrivacyAccepted(),
       this.isExtensionEnabled(),
       this.getTodayUsage(),
+      this.hasAnthropicApiKey(),
     ]);
-    return { privacyAccepted, enabled, usage };
+    return {
+      privacyAccepted, enabled, usage, hasApiKey,
+    };
   }
 }
 
@@ -71,6 +91,9 @@ async function renderPopup(doc, controller) {
   const enabledToggle = doc.getElementById('enabled-toggle');
   const usageCallsEl = doc.getElementById('usage-calls');
   const usageCostEl = doc.getElementById('usage-cost');
+  const apiKeyStatusEl = doc.getElementById('api-key-status');
+  const apiKeyInput = doc.getElementById('api-key-input');
+  const apiKeySaveBtn = doc.getElementById('api-key-save-btn');
 
   const status = await controller.getStatus();
 
@@ -85,6 +108,10 @@ async function renderPopup(doc, controller) {
   enabledToggle.checked = status.enabled;
   usageCallsEl.textContent = String(status.usage.calls);
   usageCostEl.textContent = status.usage.costUsd.toFixed(4);
+  apiKeyStatusEl.textContent = status.hasApiKey
+    ? 'Da luu (dang dung Anthropic that)'
+    : 'Chua co - dang dung du lieu gia (MockProvider)';
+  apiKeyInput.value = '';
 
   if (acceptBtn && !acceptBtn.dataset.bound) {
     acceptBtn.dataset.bound = 'true';
@@ -93,6 +120,13 @@ async function renderPopup(doc, controller) {
     enabledToggle.dataset.bound = 'true';
     enabledToggle.addEventListener('change', async () => {
       await controller.setExtensionEnabled(enabledToggle.checked);
+    });
+  }
+  if (apiKeySaveBtn && !apiKeySaveBtn.dataset.bound) {
+    apiKeySaveBtn.dataset.bound = 'true';
+    apiKeySaveBtn.addEventListener('click', async () => {
+      await controller.setAnthropicApiKey(apiKeyInput.value);
+      await renderPopup(doc, controller);
     });
   }
 }

@@ -12,6 +12,9 @@ function createMockStorage(initial = {}) {
     set: jest.fn(async (obj) => {
       Object.assign(store, obj);
     }),
+    remove: jest.fn(async (key) => {
+      delete store[key];
+    }),
   };
 }
 
@@ -24,6 +27,9 @@ function buildPopupDom() {
       <input id="enabled-toggle" type="checkbox" />
       <span id="usage-calls">0</span>
       <span id="usage-cost">0.0000</span>
+      <p id="api-key-status"></p>
+      <input id="api-key-input" type="password" />
+      <button id="api-key-save-btn" type="button">Luu key</button>
     </section>
   `;
 }
@@ -61,6 +67,31 @@ describe('PopupController', () => {
   test('throws when constructed without a storage backend', () => {
     expect(() => new PopupController({ storage: null })).toThrow();
   });
+
+  test('hasAnthropicApiKey() is false when no key is stored', async () => {
+    const controller = new PopupController({ storage: createMockStorage() });
+    expect(await controller.hasAnthropicApiKey()).toBe(false);
+  });
+
+  test('setAnthropicApiKey() trims and persists the key under chrome.storage.local; hasAnthropicApiKey() reads it back', async () => {
+    const storage = createMockStorage();
+    const controller = new PopupController({ storage });
+
+    await controller.setAnthropicApiKey('  sk-ant-abc123  ');
+
+    expect(storage.store.anthropicApiKey).toBe('sk-ant-abc123');
+    expect(await controller.hasAnthropicApiKey()).toBe(true);
+  });
+
+  test('setAnthropicApiKey("") removes the stored key', async () => {
+    const storage = createMockStorage({ anthropicApiKey: 'sk-ant-existing' });
+    const controller = new PopupController({ storage });
+
+    await controller.setAnthropicApiKey('');
+
+    expect(storage.remove).toHaveBeenCalledWith('anthropicApiKey');
+    expect(await controller.hasAnthropicApiKey()).toBe(false);
+  });
 });
 
 describe('renderPopup', () => {
@@ -94,6 +125,19 @@ describe('renderPopup', () => {
     expect(document.getElementById('enabled-toggle').checked).toBe(false);
     expect(document.getElementById('usage-calls').textContent).toBe('7');
     expect(document.getElementById('usage-cost').textContent).toBe('0.1234');
+  });
+
+  test('shows MockProvider status when no API key, Anthropic status once a key is stored', async () => {
+    buildPopupDom();
+    const noKeyController = new PopupController({ storage: createMockStorage({ privacyAccepted: true }) });
+    await renderPopup(document, noKeyController);
+    expect(document.getElementById('api-key-status').textContent).toMatch(/MockProvider/);
+
+    const withKeyController = new PopupController({
+      storage: createMockStorage({ privacyAccepted: true, anthropicApiKey: 'sk-ant-x' }),
+    });
+    await renderPopup(document, withKeyController);
+    expect(document.getElementById('api-key-status').textContent).toMatch(/Da luu/);
   });
 });
 
@@ -132,5 +176,24 @@ describe('bootstrapPopup', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(await controller.isExtensionEnabled()).toBe(false);
+  });
+
+  test('saving the API key field persists it and re-renders the status text', async () => {
+    buildPopupDom();
+    const storage = createMockStorage({ privacyAccepted: true });
+    const controller = new PopupController({ storage });
+
+    await bootstrapPopup(document, controller);
+    expect(document.getElementById('api-key-status').textContent).toMatch(/MockProvider/);
+
+    document.getElementById('api-key-input').value = 'sk-ant-new-key';
+    document.getElementById('api-key-save-btn').dispatchEvent(new window.Event('click'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(await controller.hasAnthropicApiKey()).toBe(true);
+    expect(document.getElementById('api-key-status').textContent).toMatch(/Da luu/);
+    // Input duoc xoa sau khi luu - khong giu lai key tho tren man hinh.
+    expect(document.getElementById('api-key-input').value).toBe('');
   });
 });

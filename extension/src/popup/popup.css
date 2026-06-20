@@ -31,3 +31,27 @@ dd {
 button {
   margin-top: 8px;
 }
+
+fieldset {
+  margin-top: 12px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+legend {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 0 4px;
+}
+
+#api-key-input {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 4px;
+}
+
+.hint {
+  font-size: 11px;
+  color: #777;
+  margin: 6px 0 0;
+}
