@@ -1,5 +1,11 @@
-const { DailyQuotaTracker, ServiceWorkerController, getTodayKey } = require('../../extension/src/background/service-worker');
+const {
+  DailyQuotaTracker,
+  ServiceWorkerController,
+  getTodayKey,
+  resolveProvider,
+} = require('../../extension/src/background/service-worker');
 const { APIRateLimitError } = require('../../extension/src/shared/utils');
+const { MockProvider, AnthropicProvider } = require('../../extension/src/background/llm-client');
 
 function createMockStorage() {
   const store = {};
@@ -93,6 +99,21 @@ describe('ServiceWorkerController', () => {
   test('constructor rejects missing llmClient or quotaTracker', () => {
     expect(() => new ServiceWorkerController({ quotaTracker: { isExceeded: jest.fn() } })).toThrow();
     expect(() => new ServiceWorkerController({ llmClient: { analyzeCode: jest.fn() } })).toThrow();
+  });
+});
+
+describe('resolveProvider', () => {
+  test('returns a MockProvider when no Anthropic API key is stored', async () => {
+    const storage = { get: jest.fn(async () => ({})) };
+    const provider = await resolveProvider(storage);
+    expect(provider).toBeInstanceOf(MockProvider);
+  });
+
+  test('returns an AnthropicProvider using the key from chrome.storage.local when present', async () => {
+    const storage = { get: jest.fn(async () => ({ anthropicApiKey: 'sk-ant-from-storage' })) };
+    const provider = await resolveProvider(storage);
+    expect(provider).toBeInstanceOf(AnthropicProvider);
+    expect(provider.apiKey).toBe('sk-ant-from-storage');
   });
 });
 

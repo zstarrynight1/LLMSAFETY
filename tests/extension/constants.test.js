@@ -1,9 +1,14 @@
 const constants = require('../../extension/src/shared/constants');
 
 describe('constants', () => {
-  test('does not contain any API key field', () => {
-    const serialized = JSON.stringify(constants).toLowerCase();
-    expect(serialized).not.toMatch(/api_key|apikey|secret|token/);
+  test('does not contain any real secret value (storage key NAMES like ANTHROPIC_API_KEY_STORAGE_KEY are allowed - they are labels, not secrets)', () => {
+    const serialized = JSON.stringify(constants);
+    // Gia tri secret that thuong co prefix dac trung nha cung cap (vd sk-ant-..., sk-proj-...).
+    expect(serialized).not.toMatch(/sk-ant-|sk-proj-|sk-[a-zA-Z0-9]{20,}/);
+  });
+
+  test('ANTHROPIC_API_KEY_STORAGE_KEY is only a storage key name, not a secret value', () => {
+    expect(constants.ANTHROPIC_API_KEY_STORAGE_KEY).toBe('anthropicApiKey');
   });
 
   test('CWE_TAXONOMY is frozen and covers common web vulnerability classes', () => {

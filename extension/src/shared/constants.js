@@ -25,6 +25,21 @@ const SUPPORTED_DOMAINS = Object.freeze(['stackoverflow.com', 'github.com']);
 
 const DEBUG_MODE = false; // bat thu cong khi dev, PHAI tat khi build production
 
+// --- Anthropic provider config (KHONG chua API key - key luu o chrome.storage.local) ---
+const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
+const ANTHROPIC_API_VERSION = '2023-06-01';
+// claude-haiku-4-5: re nhat/nhanh nhat, phu hop use case real-time trong extension
+// (xem RESEARCH_PLAN.md RQ3 - co the doi sang claude-sonnet-4-6/claude-opus-4-8 de
+// so sanh trade-off chi phi/do chinh xac trong research/evaluation/).
+const DEFAULT_ANTHROPIC_MODEL = 'claude-haiku-4-5';
+const ANTHROPIC_PRICING_USD_PER_MTOK = Object.freeze({
+  'claude-opus-4-8': { input: 5.0, output: 25.0 },
+  'claude-sonnet-4-6': { input: 3.0, output: 15.0 },
+  'claude-haiku-4-5': { input: 1.0, output: 5.0 },
+});
+// Ten key trong chrome.storage.local - KHONG phai gia tri secret, chi la ten field.
+const ANTHROPIC_API_KEY_STORAGE_KEY = 'anthropicApiKey';
+
 const constantsExports = {
   CWE_TAXONOMY,
   MAX_PROMPT_LENGTH,
@@ -35,6 +50,11 @@ const constantsExports = {
   MAX_DAILY_COST_USD,
   SUPPORTED_DOMAINS,
   DEBUG_MODE,
+  ANTHROPIC_API_URL,
+  ANTHROPIC_API_VERSION,
+  DEFAULT_ANTHROPIC_MODEL,
+  ANTHROPIC_PRICING_USD_PER_MTOK,
+  ANTHROPIC_API_KEY_STORAGE_KEY,
 };
 
 if (typeof module !== 'undefined' && module.exports) {
