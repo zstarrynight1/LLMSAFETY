@@ -12,10 +12,10 @@ const Modules = (() => {
 })();
 
 const { getTodayKey } = Modules.Utils;
-const { ANTHROPIC_API_KEY_STORAGE_KEY } = Modules.Constants;
+const { ANTHROPIC_API_KEY_STORAGE_KEY, EXTENSION_ENABLED_STORAGE_KEY } = Modules.Constants;
 
 const PRIVACY_ACCEPTED_KEY = 'privacyAccepted';
-const EXTENSION_ENABLED_KEY = 'extensionEnabled';
+const EXTENSION_ENABLED_KEY = EXTENSION_ENABLED_STORAGE_KEY;
 
 class PopupController {
   constructor({ storage = (typeof chrome !== 'undefined' ? chrome.storage.local : null), now = () => new Date() } = {}) {

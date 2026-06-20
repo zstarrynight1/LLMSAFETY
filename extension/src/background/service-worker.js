@@ -12,16 +12,18 @@ const Modules = (() => {
       Constants: require('../shared/constants'),
       Cache: require('./cache'),
       LLMClientModule: require('./llm-client'),
+      LLMProvidersModule: require('./llm-providers'),
     };
   }
   // Service worker that: 1 file duy nhat duoc khai trong manifest, phai tu importScripts
   // cac file con lai vao cung global scope.
-  importScripts('../shared/constants.js', '../shared/utils.js', './cache.js', './llm-client.js');
+  importScripts('../shared/constants.js', '../shared/utils.js', './cache.js', './llm-providers.js', './llm-client.js');
   return {
     Utils: globalThis.SafetyExt,
     Constants: globalThis.SafetyExt,
     Cache: globalThis.SafetyExt,
     LLMClientModule: globalThis.SafetyExt,
+    LLMProvidersModule: globalThis.SafetyExt,
   };
 })();
 
@@ -31,9 +33,11 @@ const {
   MAX_DAILY_COST_USD,
   DEBUG_MODE,
   ANTHROPIC_API_KEY_STORAGE_KEY,
+  EXTENSION_ENABLED_STORAGE_KEY,
 } = Modules.Constants;
 const { CacheStore } = Modules.Cache;
-const { LLMClient, MockProvider, AnthropicProvider } = Modules.LLMClientModule;
+const { LLMClient } = Modules.LLMClientModule;
+const { MockProvider, AnthropicProvider } = Modules.LLMProvidersModule;
 
 // Doc API key tu chrome.storage.local (KHONG phai constants.js - coding-rules.md 4.2/3.4).
 // Neu user chua luu key (qua popup), fallback ve MockProvider de extension van chay duoc
@@ -45,6 +49,28 @@ async function resolveProvider(storage) {
     return new AnthropicProvider({ apiKey });
   }
   return new MockProvider();
+}
+
+// Toggle "bat/tat" trong popup ghi vao day - PHAI doc lai o day truoc khi phan tich, neu khong
+// toggle chi doi UI ma khong co tac dung thuc te (popup va service-worker phai dung chung 1 key).
+async function isExtensionEnabled(storage) {
+  const stored = await storage.get(EXTENSION_ENABLED_STORAGE_KEY);
+  if (stored && EXTENSION_ENABLED_STORAGE_KEY in stored) {
+    return Boolean(stored[EXTENSION_ENABLED_STORAGE_KEY]);
+  }
+  return true; // mac dinh bat, giong popup.js
+}
+
+// Lock trong bo nho (promise chain) de serialize cac thao tac doc-sua-ghi tren quota qua
+// chrome.storage.local. Service worker JS la single-threaded, nhung nhieu message
+// (vd nhieu code block tren 1 trang) deu spawn 1 async handler rieng khong cho nhau - giua
+// 1 lan "await storage.get" va "await storage.set" co the co handler khac xen vao doc cung
+// gia tri cu (TOCTOU), khien quota bi vuot. Lock nay ep moi thao tac quota chay tuan tu.
+let quotaLockChain = Promise.resolve();
+function withQuotaLock(fn) {
+  const run = quotaLockChain.then(fn, fn);
+  quotaLockChain = run.then(() => {}, () => {});
+  return run;
 }
 
 class DailyQuotaTracker {
@@ -74,35 +100,51 @@ class DailyQuotaTracker {
     return usage.calls >= this.maxCalls || usage.costUsd >= this.maxCostUsd;
   }
 
-  async recordUsage({ costUsd = 0 } = {}) {
-    const key = getTodayKey(this.now());
-    const usage = await this.getUsage();
-    const updated = { calls: usage.calls + 1, costUsd: usage.costUsd + costUsd };
-    await this.storage.set({ [key]: updated });
-    return updated;
+  // Check-and-increment ATOMIC (qua withQuotaLock) - goi NGAY TRUOC 1 lan goi API that (xem
+  // LLMClient.beforeProviderCall trong llm-client.js). Tra ve false neu da vuot quota - khong
+  // tang calls trong truong hop do. Chi tang "calls", chua biet costUsd that (xem addCost()).
+  async reserveCall() {
+    return withQuotaLock(async () => {
+      const usage = await this.getUsage();
+      if (usage.calls >= this.maxCalls || usage.costUsd >= this.maxCostUsd) {
+        return false;
+      }
+      const key = getTodayKey(this.now());
+      await this.storage.set({ [key]: { calls: usage.calls + 1, costUsd: usage.costUsd } });
+      return true;
+    });
+  }
+
+  // Cong don chi phi THAT sau khi 1 lan goi API thanh cong (qua onUsage callback cua LLMClient).
+  // Tach rieng khoi reserveCall() vi tai thoi diem reserve chua biet costUsd chinh xac.
+  async addCost(costUsd) {
+    if (!costUsd) return;
+    return withQuotaLock(async () => {
+      const usage = await this.getUsage();
+      const key = getTodayKey(this.now());
+      await this.storage.set({ [key]: { calls: usage.calls, costUsd: usage.costUsd + costUsd } });
+    });
   }
 }
 
 class ServiceWorkerController {
-  constructor({ llmClient, quotaTracker } = {}) {
+  // Quota gio duoc gate ben trong LLMClient (qua beforeProviderCall, xem wiring ben duoi) -
+  // chi gate dung luc sap goi API that, khong chan nham cache hit (fix loi thu tu cu).
+  // Controller chi con trach nhiem: kiem tra extensionEnabled roi giao cho llmClient.
+  constructor({ llmClient, isEnabledFn = async () => true } = {}) {
     if (!llmClient || typeof llmClient.analyzeCode !== 'function') {
       throw new Error('ServiceWorkerController can mot llmClient hop le');
     }
-    if (!quotaTracker || typeof quotaTracker.isExceeded !== 'function') {
-      throw new Error('ServiceWorkerController can mot quotaTracker hop le');
-    }
     this.llmClient = llmClient;
-    this.quotaTracker = quotaTracker;
+    this.isEnabledFn = isEnabledFn;
   }
 
   async handleAnalyzeRequest(payload) {
-    const { codeText, context } = payload || {};
-    const exceeded = await this.quotaTracker.isExceeded();
-    if (exceeded) {
-      throw new APIRateLimitError(
-        'Da vuot qua gioi han goi LLM API trong ngay (MAX_DAILY_API_CALLS hoac MAX_DAILY_COST_USD).',
-      );
+    const enabled = await this.isEnabledFn();
+    if (!enabled) {
+      throw new Error('Extension dang tat (xem popup) - khong phan tich code snippet.');
     }
+    const { codeText, context } = payload || {};
     return this.llmClient.analyzeCode(codeText, context);
   }
 }
@@ -112,6 +154,7 @@ const serviceWorkerExports = {
   ServiceWorkerController,
   getTodayKey,
   resolveProvider,
+  isExtensionEnabled,
 };
 
 if (typeof module !== 'undefined' && module.exports) {
@@ -138,8 +181,19 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
         provider,
         cache,
         debugMode: DEBUG_MODE,
+        // Gate quota dung luc sap goi API that (sau khi LLMClient da xac nhan cache MISS) -
+        // qua reserveCall() atomic (xem withQuotaLock o tren), tranh TOCTOU khi nhieu code
+        // block tren cung 1 trang gui message gan nhu dong thoi.
+        beforeProviderCall: async () => {
+          const allowed = await quotaTracker.reserveCall();
+          if (!allowed) {
+            throw new APIRateLimitError(
+              'Da vuot qua gioi han goi LLM API trong ngay (MAX_DAILY_API_CALLS hoac MAX_DAILY_COST_USD).',
+            );
+          }
+        },
         onUsage: (usage) => {
-          quotaTracker.recordUsage({ costUsd: usage.costUsd || 0 }).catch((err) => {
+          quotaTracker.addCost(usage.costUsd || 0).catch((err) => {
             if (DEBUG_MODE) {
               // eslint-disable-next-line no-console
               console.error('[service-worker] khong the ghi quota:', formatErrorForLog(err));
@@ -147,7 +201,10 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
           });
         },
       });
-      const controller = new ServiceWorkerController({ llmClient, quotaTracker });
+      const controller = new ServiceWorkerController({
+        llmClient,
+        isEnabledFn: () => isExtensionEnabled(storage),
+      });
 
       try {
         const result = await controller.handleAnalyzeRequest(message.payload);

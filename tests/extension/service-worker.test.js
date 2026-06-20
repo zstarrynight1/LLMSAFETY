@@ -3,9 +3,9 @@ const {
   ServiceWorkerController,
   getTodayKey,
   resolveProvider,
+  isExtensionEnabled,
 } = require('../../extension/src/background/service-worker');
-const { APIRateLimitError } = require('../../extension/src/shared/utils');
-const { MockProvider, AnthropicProvider } = require('../../extension/src/background/llm-client');
+const { MockProvider, AnthropicProvider } = require('../../extension/src/background/llm-providers');
 
 function createMockStorage() {
   const store = {};
@@ -33,27 +33,65 @@ describe('DailyQuotaTracker', () => {
     expect(await tracker.isExceeded()).toBe(false);
   });
 
-  test('recordUsage() accumulates calls and cost across the same day', async () => {
+  test('reserveCall() increments calls and returns true when under quota', async () => {
     const fixedNow = () => new Date('2026-06-20T12:00:00Z');
-    const tracker = new DailyQuotaTracker({ storage: createMockStorage(), now: fixedNow });
+    const tracker = new DailyQuotaTracker({ storage: createMockStorage(), now: fixedNow, maxCalls: 5, maxCostUsd: 1 });
 
-    await tracker.recordUsage({ costUsd: 0.01 });
-    const usage = await tracker.recordUsage({ costUsd: 0.02 });
+    const allowed = await tracker.reserveCall();
+    const usage = await tracker.getUsage();
 
-    expect(usage).toEqual({ calls: 2, costUsd: 0.03 });
+    expect(allowed).toBe(true);
+    expect(usage).toEqual({ calls: 1, costUsd: 0 });
   });
 
-  test('isExceeded() becomes true once maxCalls is reached', async () => {
-    const tracker = new DailyQuotaTracker({ storage: createMockStorage(), maxCalls: 2, maxCostUsd: 100 });
-    await tracker.recordUsage({ costUsd: 0 });
-    await tracker.recordUsage({ costUsd: 0 });
-    expect(await tracker.isExceeded()).toBe(true);
+  test('reserveCall() returns false and does not increment once maxCalls is reached', async () => {
+    const tracker = new DailyQuotaTracker({ storage: createMockStorage(), maxCalls: 1, maxCostUsd: 100 });
+
+    expect(await tracker.reserveCall()).toBe(true);
+    expect(await tracker.reserveCall()).toBe(false);
+
+    const usage = await tracker.getUsage();
+    expect(usage.calls).toBe(1); // lan reserve thu 2 bi tu choi, khong tang them
   });
 
-  test('isExceeded() becomes true once maxCostUsd is reached', async () => {
-    const tracker = new DailyQuotaTracker({ storage: createMockStorage(), maxCalls: 1000, maxCostUsd: 0.05 });
-    await tracker.recordUsage({ costUsd: 0.05 });
-    expect(await tracker.isExceeded()).toBe(true);
+  test('reserveCall() returns false once maxCostUsd is already reached', async () => {
+    const storage = createMockStorage();
+    const tracker = new DailyQuotaTracker({ storage, maxCalls: 1000, maxCostUsd: 0.05 });
+    await tracker.addCost(0.05);
+
+    expect(await tracker.reserveCall()).toBe(false);
+  });
+
+  test('addCost() accumulates cost without touching calls', async () => {
+    const tracker = new DailyQuotaTracker({ storage: createMockStorage() });
+    await tracker.reserveCall();
+    await tracker.addCost(0.01);
+    await tracker.addCost(0.02);
+
+    const usage = await tracker.getUsage();
+    expect(usage).toEqual({ calls: 1, costUsd: 0.03 });
+  });
+
+  test('addCost(0) is a no-op (does not write to storage)', async () => {
+    const storage = createMockStorage();
+    const tracker = new DailyQuotaTracker({ storage });
+    await tracker.addCost(0);
+    expect(storage.set).not.toHaveBeenCalled();
+  });
+
+  test('reserveCall() is atomic under concurrent calls (no TOCTOU race past maxCalls)', async () => {
+    // Mo phong nhieu code block tren 1 trang gui message gan nhu dong thoi (vd detector.js
+    // forEach qua N code block, moi cai goi chrome.runtime.sendMessage rieng) - tat ca cung
+    // goi reserveCall() truoc khi handler nao kip ghi lai storage.
+    const storage = createMockStorage();
+    const tracker = new DailyQuotaTracker({ storage, maxCalls: 5, maxCostUsd: 100 });
+
+    const results = await Promise.all(Array.from({ length: 10 }, () => tracker.reserveCall()));
+
+    const allowedCount = results.filter(Boolean).length;
+    expect(allowedCount).toBe(5); // dung 5/10 duoc chap nhan, khong vuot maxCalls
+    const usage = await tracker.getUsage();
+    expect(usage.calls).toBe(5);
   });
 
   test('usage resets on a new UTC day (different storage key)', async () => {
@@ -61,7 +99,7 @@ describe('DailyQuotaTracker', () => {
     let current = new Date('2026-06-20T12:00:00Z');
     const tracker = new DailyQuotaTracker({ storage, maxCalls: 1, maxCostUsd: 100, now: () => current });
 
-    await tracker.recordUsage({ costUsd: 0 });
+    await tracker.reserveCall();
     expect(await tracker.isExceeded()).toBe(true);
 
     current = new Date('2026-06-21T00:00:01Z');
@@ -73,14 +111,31 @@ describe('DailyQuotaTracker', () => {
   });
 });
 
+describe('isExtensionEnabled', () => {
+  test('defaults to true when never set', async () => {
+    const storage = { get: jest.fn(async () => ({})) };
+    expect(await isExtensionEnabled(storage)).toBe(true);
+  });
+
+  test('returns false when explicitly disabled in storage', async () => {
+    const storage = { get: jest.fn(async () => ({ extensionEnabled: false })) };
+    expect(await isExtensionEnabled(storage)).toBe(false);
+  });
+
+  test('returns true when explicitly enabled in storage', async () => {
+    const storage = { get: jest.fn(async () => ({ extensionEnabled: true })) };
+    expect(await isExtensionEnabled(storage)).toBe(true);
+  });
+});
+
 describe('ServiceWorkerController', () => {
-  function createControllerWith({ exceeded = false, analyzeResult = { vulnerable: false } } = {}) {
+  function createControllerWith({ enabled = true, analyzeResult = { vulnerable: false } } = {}) {
     const llmClient = { analyzeCode: jest.fn(async () => analyzeResult) };
-    const quotaTracker = { isExceeded: jest.fn(async () => exceeded), recordUsage: jest.fn() };
-    return { controller: new ServiceWorkerController({ llmClient, quotaTracker }), llmClient, quotaTracker };
+    const isEnabledFn = jest.fn(async () => enabled);
+    return { controller: new ServiceWorkerController({ llmClient, isEnabledFn }), llmClient, isEnabledFn };
   }
 
-  test('calls llmClient.analyzeCode and returns its result when quota is not exceeded', async () => {
+  test('calls llmClient.analyzeCode and returns its result when extension is enabled', async () => {
     const { controller, llmClient } = createControllerWith({ analyzeResult: { vulnerable: true, cweId: 'CWE-79' } });
 
     const result = await controller.handleAnalyzeRequest({ codeText: '<script>', context: { language: 'html' } });
@@ -89,16 +144,21 @@ describe('ServiceWorkerController', () => {
     expect(result).toEqual({ vulnerable: true, cweId: 'CWE-79' });
   });
 
-  test('throws APIRateLimitError and never calls the LLM client when quota is exceeded', async () => {
-    const { controller, llmClient } = createControllerWith({ exceeded: true });
+  test('throws and never calls the LLM client when extension is disabled', async () => {
+    const { controller, llmClient } = createControllerWith({ enabled: false });
 
-    await expect(controller.handleAnalyzeRequest({ codeText: 'x', context: {} })).rejects.toThrow(APIRateLimitError);
+    await expect(controller.handleAnalyzeRequest({ codeText: 'x', context: {} })).rejects.toThrow();
     expect(llmClient.analyzeCode).not.toHaveBeenCalled();
   });
 
-  test('constructor rejects missing llmClient or quotaTracker', () => {
-    expect(() => new ServiceWorkerController({ quotaTracker: { isExceeded: jest.fn() } })).toThrow();
-    expect(() => new ServiceWorkerController({ llmClient: { analyzeCode: jest.fn() } })).toThrow();
+  test('defaults to enabled when isEnabledFn is not provided', async () => {
+    const llmClient = { analyzeCode: jest.fn(async () => ({ vulnerable: false })) };
+    const controller = new ServiceWorkerController({ llmClient });
+    await expect(controller.handleAnalyzeRequest({ codeText: 'x', context: {} })).resolves.toEqual({ vulnerable: false });
+  });
+
+  test('constructor rejects missing llmClient', () => {
+    expect(() => new ServiceWorkerController({})).toThrow();
   });
 });
 
@@ -178,6 +238,24 @@ describe('chrome.runtime.onMessage wiring (full module bootstrap)', () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({ ok: false, error: expect.any(Object) }));
+  });
+
+  test('listener responds with { ok: false } and does not call analyzeCode when extension is disabled', async () => {
+    global.chrome.storage.local.get = jest.fn(async (key) => (key === 'extensionEnabled' ? { extensionEnabled: false } : {}));
+    // eslint-disable-next-line global-require
+    require('../../extension/src/background/service-worker');
+
+    const sendResponse = jest.fn();
+    registeredListener(
+      { type: 'ANALYZE_CODE_SNIPPET', payload: { codeText: 'os.system(x)', context: {} } },
+      {},
+      sendResponse,
+    );
+
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(sendResponse).toHaveBeenCalledWith(expect.objectContaining({ ok: false }));
   });
 
   test('listener returns false (ignores) messages of an unrelated type', () => {

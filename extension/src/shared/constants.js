@@ -40,6 +40,11 @@ const ANTHROPIC_PRICING_USD_PER_MTOK = Object.freeze({
 // Ten key trong chrome.storage.local - KHONG phai gia tri secret, chi la ten field.
 const ANTHROPIC_API_KEY_STORAGE_KEY = 'anthropicApiKey';
 
+// Dung chung boi popup.js (ghi khi user bat/tat) va service-worker.js (doc truoc khi phan tich) -
+// dat o day de 2 file luon dung chung 1 ten key, tranh tinh trang toggle "tat" trong popup
+// khong co tac dung thuc te vi khong noi nao doc lai.
+const EXTENSION_ENABLED_STORAGE_KEY = 'extensionEnabled';
+
 const constantsExports = {
   CWE_TAXONOMY,
   MAX_PROMPT_LENGTH,
@@ -55,6 +60,7 @@ const constantsExports = {
   DEFAULT_ANTHROPIC_MODEL,
   ANTHROPIC_PRICING_USD_PER_MTOK,
   ANTHROPIC_API_KEY_STORAGE_KEY,
+  EXTENSION_ENABLED_STORAGE_KEY,
 };
 
 if (typeof module !== 'undefined' && module.exports) {
