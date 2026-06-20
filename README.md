@@ -106,6 +106,14 @@ Kết quả mỗi baseline là 1 file `.jsonl` (mỗi dòng = 1 snippet). Dùng 
 (hàm `summarize()`) để tính Precision/Recall/F1/FPR/chi phí/độ trễ — cần tự nối kết quả với nhãn
 ground-truth (`label_human` từ `label_snippets.py`) theo `question_id` trước khi gọi `summarize()`.
 
+## Publish lên Chrome Web Store
+
+Không bắt buộc cho mục đích nghiên cứu (xem RESEARCH_PLAN.md mục 8) — nhưng nếu muốn public:
+xem `docs/chrome-web-store-listing.md` (checklist, mô tả listing, justification permissions,
+lệnh đóng gói zip) và `docs/privacy.html` (privacy policy — cần publish qua GitHub Pages,
+Settings → Pages → branch `main` / folder `/docs`, rồi điền URL đó vào Developer Dashboard).
+Bước nộp/trả phí/submit review phải tự làm thủ công trên Google Developer Dashboard.
+
 ## Lưu ý bảo mật
 
 - Không bao giờ commit `.env` hoặc bất kỳ file nào chứa API key thật.
