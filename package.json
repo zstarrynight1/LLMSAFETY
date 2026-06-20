@@ -1,0 +1,13 @@
+{
+  "name": "llm-code-safety-extension",
+  "version": "0.1.0",
+  "private": true,
+  "description": "LLM-Powered Code Safety Browser Extension - test/build tooling cho phan extension/ (JS).",
+  "scripts": {
+    "test": "jest tests/extension"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0"
+  }
+}
