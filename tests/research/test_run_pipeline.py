@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "research" / "evaluation"))
 
-from llm_provider import DryRunProvider  # noqa: E402
+from llm_provider import APITimeoutError, DryRunProvider, SchemaValidationError  # noqa: E402
 from run_pipeline import (  # noqa: E402
     heuristic_prefilter,
     load_snippets,
@@ -88,6 +88,67 @@ def test_run_pipeline_on_snippet_uses_detector_result_directly_when_judge_disabl
     assert result["judge_result"] is None
     assert result["predicted"] == detector_result
     assert result["usage"]["cost_usd"] == 0.001  # chi 1 lan goi (detector), khong co judge
+
+
+def test_run_pipeline_on_snippet_detector_error_returns_error_row_instead_of_raising():
+    class FailingProvider:
+        def analyze(self, *args, **kwargs):  # noqa: ARG002
+            raise APITimeoutError("vuot qua timeout 30s")
+
+    result = run_pipeline_on_snippet(SAMPLE_SNIPPETS[0], FailingProvider(), judge_provider=None, clock_fn=lambda: 0.0)
+
+    assert result["predicted"] is None
+    assert result["error"] is not None
+    assert "buoc 2" in result["error"]
+
+
+def test_run_pipeline_on_snippet_judge_error_falls_back_to_detector_result():
+    detector_result = {"vulnerable": True, "cweId": "CWE-89", "explanation": "detector", "confidence": 0.7, "fixSuggestion": None}
+
+    class DetectorProvider:
+        def analyze(self, *args, **kwargs):  # noqa: ARG002
+            return detector_result, {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15, "cost_usd": 0.001}
+
+    class FailingJudgeProvider:
+        def analyze(self, *args, **kwargs):  # noqa: ARG002
+            raise SchemaValidationError("output LLM sai schema")
+
+    result = run_pipeline_on_snippet(SAMPLE_SNIPPETS[0], DetectorProvider(), FailingJudgeProvider(), clock_fn=lambda: 0.0)
+
+    assert result["detector_result"] == detector_result
+    assert result["judge_result"] is None
+    assert result["predicted"] == detector_result  # fallback ve ket qua detector, khong mat du lieu
+    assert result["error"] is not None
+    assert "buoc 3" in result["error"]
+
+
+def test_run_pipeline_continues_processing_remaining_snippets_after_one_detector_error(tmp_path):
+    # Truoc fix: 1 loi tam thoi (vd APITimeoutError) o snippet giua batch se lam crash toan bo
+    # run_pipeline(), mat het cac snippet con lai chua xu ly.
+    class FlakyOnSecondCallProvider:
+        def __init__(self):
+            self.calls = 0
+
+        def analyze(self, *args, **kwargs):  # noqa: ARG002
+            self.calls += 1
+            if self.calls == 1:
+                raise APITimeoutError("loi tam thoi")
+            return {"vulnerable": False, "cweId": None, "explanation": "ok", "confidence": 0.2, "fixSuggestion": None}, {
+                "prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2, "cost_usd": 0.0001,
+            }
+
+    snippets = [SAMPLE_SNIPPETS[0], SAMPLE_SNIPPETS[3]]  # 2 snippet hop le (qua heuristic)
+    output_path = tmp_path / "results.jsonl"
+
+    results = run_pipeline(
+        snippets, FlakyOnSecondCallProvider(), judge_provider=None, output_path=output_path,
+        save_every=10, print_fn=lambda _: None,
+    )
+
+    assert len(results) == 2  # ca 2 snippet deu duoc xu ly (1 loi, 1 thanh cong), khong crash
+    assert results[0]["error"] is not None
+    assert results[1]["error"] is None
+    assert results[1]["predicted"]["vulnerable"] is False
 
 
 def test_run_pipeline_writes_intermediate_results_immediately_not_holding_everything_in_ram(tmp_path):

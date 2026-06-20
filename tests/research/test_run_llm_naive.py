@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "research" / "evaluation"))
 
-from llm_provider import DryRunProvider  # noqa: E402
+from llm_provider import APIRateLimitError, APITimeoutError, DryRunProvider, SchemaValidationError  # noqa: E402
 from run_llm_naive import (  # noqa: E402
     load_snippets,
     run_naive_baseline,
@@ -40,6 +40,47 @@ def test_run_naive_on_snippet_does_not_pass_context_to_provider(monkeypatch):
     run_naive_on_snippet(SAMPLE_SNIPPETS[0], SpyProvider())
     assert captured["context"] is None
     assert captured["include_context"] is False  # baseline naive: KHONG context (RESEARCH_PLAN.md 4.1)
+
+
+def test_run_naive_on_snippet_catches_timeout_error_without_raising():
+    class TimeoutProvider:
+        def analyze(self, *args, **kwargs):  # noqa: ARG002
+            raise APITimeoutError("vuot qua timeout")
+
+    result = run_naive_on_snippet(SAMPLE_SNIPPETS[0], TimeoutProvider(), clock_fn=lambda: 0.0)
+    assert result["predicted"] is None
+    assert result["error"] is not None
+
+
+def test_run_naive_on_snippet_catches_rate_limit_error_without_raising():
+    class RateLimitedProvider:
+        def analyze(self, *args, **kwargs):  # noqa: ARG002
+            raise APIRateLimitError("vuot rate limit")
+
+    result = run_naive_on_snippet(SAMPLE_SNIPPETS[0], RateLimitedProvider(), clock_fn=lambda: 0.0)
+    assert result["predicted"] is None
+    assert result["error"] is not None
+
+
+def test_run_naive_on_snippet_catches_schema_validation_error_without_raising():
+    class BadSchemaProvider:
+        def analyze(self, *args, **kwargs):  # noqa: ARG002
+            raise SchemaValidationError("output sai schema")
+
+    result = run_naive_on_snippet(SAMPLE_SNIPPETS[0], BadSchemaProvider(), clock_fn=lambda: 0.0)
+    assert result["predicted"] is None
+    assert result["error"] is not None
+
+
+def test_run_naive_on_snippet_catches_generic_runtime_error_without_raising():
+    # RuntimeError la loi 5xx/connection tu AnthropicProvider sau khi SDK da retry het.
+    class ServerErrorProvider:
+        def analyze(self, *args, **kwargs):  # noqa: ARG002
+            raise RuntimeError("Anthropic API loi server (HTTP 500)")
+
+    result = run_naive_on_snippet(SAMPLE_SNIPPETS[0], ServerErrorProvider(), clock_fn=lambda: 0.0)
+    assert result["predicted"] is None
+    assert result["error"] is not None
 
 
 def test_run_naive_baseline_writes_one_result_per_snippet_immediately_to_file(tmp_path):

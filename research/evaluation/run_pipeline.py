@@ -23,13 +23,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from llm_provider import (  # noqa: E402
     DEFAULT_MODEL,
     AnthropicProvider,
+    APIRateLimitError,
+    APITimeoutError,
     DryRunProvider,
+    SchemaValidationError,
+    ValidationError,
     confirm_batch_run,
 )
 
 MIN_CODE_LENGTH_FOR_ANALYSIS = 20
 SAVE_PROGRESS_EVERY_N = 10
 EMPTY_USAGE = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "cost_usd": 0.0}
+# Tat ca loi provider.analyze() co the nem ra (xem llm_provider.AnthropicProvider.analyze) - bat
+# o day de 1 snippet/1 buoc loi (vd timeout tam thoi, output sai schema) khong lam crash CA BATCH
+# dang chay (coding-rules.md muc 8 - ket qua truoc do da flush ra file, nhung batch con lai van
+# nen tiep tuc thay vi dung giua chung).
+LLM_CALL_ERRORS = (ValidationError, APITimeoutError, APIRateLimitError, SchemaValidationError, RuntimeError)
 
 
 def heuristic_prefilter(code_text):
@@ -50,25 +59,44 @@ def _sum_usage(a, b):
 def run_pipeline_on_snippet(snippet, detector_provider, judge_provider=None, clock_fn=time.monotonic):
     start = clock_fn()
     code_text = snippet.get("code_text", "")
+    question_id = snippet.get("question_id")
+    language = snippet.get("language")
 
     if not heuristic_prefilter(code_text):
         return {
-            "question_id": snippet.get("question_id"),
-            "language": snippet.get("language"),
+            "question_id": question_id,
+            "language": language,
             "filtered_by_heuristic": True,
             "detector_result": None,
             "judge_result": None,
             "predicted": None,
             "usage": dict(EMPTY_USAGE),
             "latency_ms": (clock_fn() - start) * 1000,
+            "error": None,
         }
 
-    context = {"language": snippet.get("language")}
-    detector_result, detector_usage = detector_provider.analyze(code_text, context, include_context=True)
+    context = {"language": language}
+    try:
+        detector_result, detector_usage = detector_provider.analyze(code_text, context, include_context=True)
+    except LLM_CALL_ERRORS as exc:
+        # Loi o buoc detector (timeout/rate-limit/output sai schema/loi server) - tra ve 1 row
+        # "loi" thay vi de exception lam crash CA BATCH dang chay (cac snippet truoc da flush an toan).
+        return {
+            "question_id": question_id,
+            "language": language,
+            "filtered_by_heuristic": False,
+            "detector_result": None,
+            "judge_result": None,
+            "predicted": None,
+            "usage": dict(EMPTY_USAGE),
+            "latency_ms": (clock_fn() - start) * 1000,
+            "error": f"Loi buoc 2 (LLM-as-detector): {exc}",
+        }
 
     judge_result = None
     judge_usage = dict(EMPTY_USAGE)
     final_result = detector_result
+    error = None
 
     if judge_provider is not None:
         judge_input = (
@@ -77,18 +105,24 @@ def run_pipeline_on_snippet(snippet, detector_provider, judge_provider=None, clo
             "Code goc can doi chieu:\n"
             f"{code_text}"
         )
-        judge_result, judge_usage = judge_provider.analyze(judge_input, context, include_context=True)
-        final_result = judge_result
+        try:
+            judge_result, judge_usage = judge_provider.analyze(judge_input, context, include_context=True)
+            final_result = judge_result
+        except LLM_CALL_ERRORS as exc:
+            # Detector da thanh cong - giu ket qua detector lam fallback thay vi mat het du lieu
+            # cua snippet nay chi vi buoc judge (tuy chon) bi loi.
+            error = f"Loi buoc 3 (LLM-as-judge), dung ket qua buoc 2 lam fallback: {exc}"
 
     return {
-        "question_id": snippet.get("question_id"),
-        "language": snippet.get("language"),
+        "question_id": question_id,
+        "language": language,
         "filtered_by_heuristic": False,
         "detector_result": detector_result,
         "judge_result": judge_result,
         "predicted": final_result,
         "usage": _sum_usage(detector_usage, judge_usage),
         "latency_ms": (clock_fn() - start) * 1000,
+        "error": error,
     }
 
 

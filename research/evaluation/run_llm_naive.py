@@ -16,12 +16,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from llm_provider import (  # noqa: E402
     DEFAULT_MODEL,
     AnthropicProvider,
+    APIRateLimitError,
+    APITimeoutError,
     DryRunProvider,
+    SchemaValidationError,
     ValidationError,
     confirm_batch_run,
 )
 
 SAVE_PROGRESS_EVERY_N = 10
+# Tat ca loi provider.analyze() co the nem ra - truoc day chi bat ValidationError, bo sot
+# APITimeoutError/APIRateLimitError/SchemaValidationError/RuntimeError (van se crash ca batch).
+LLM_CALL_ERRORS = (ValidationError, APITimeoutError, APIRateLimitError, SchemaValidationError, RuntimeError)
 
 
 def load_snippets(input_path):
@@ -39,7 +45,7 @@ def run_naive_on_snippet(snippet, provider, clock_fn=time.monotonic):
     error = None
     try:
         result, usage = provider.analyze(snippet["code_text"], context=None, include_context=False)
-    except ValidationError as exc:
+    except LLM_CALL_ERRORS as exc:
         result = None
         usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "cost_usd": 0.0}
         error = str(exc)
