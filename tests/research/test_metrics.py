@@ -12,6 +12,7 @@ from metrics import (  # noqa: E402
     compute_metrics_by_cwe,
     confusion_counts,
     false_positive_rate,
+    flatten_prediction_record,
     precision_recall_f1,
     summarize,
 )
@@ -100,3 +101,67 @@ def test_summarize_combines_all_metrics():
     assert "CWE-89" in summary["by_cwe"]
     assert "cost_usd_per_1000_snippets" in summary
     assert "latency" in summary
+
+
+# --- flatten_prediction_record: bug tim duoc qua code review - run_pipeline.py/run_llm_naive.py
+# xuat record LONG NHAU (predicted.vulnerable, usage.cost_usd), khac voi run_baseline_static.py
+# (da phang san predicted_vulnerable/cost_usd o top-level). Neu khong flatten, cac ham metrics
+# se am tham doc None -> tinh sai ket qua ma khong bao loi nao.
+
+PIPELINE_SHAPED_RECORD = {
+    "question_id": 1,
+    "filtered_by_heuristic": False,
+    "predicted": {"vulnerable": True, "cweId": "CWE-89", "confidence": 0.9},
+    "usage": {"cost_usd": 0.002},
+    "latency_ms": 120.5,
+}
+
+BASELINE_SHAPED_RECORD = {
+    "question_id": 2,
+    "predicted_vulnerable": False,
+    "bandit_result": {"vulnerable": False, "issues": []},
+}
+
+
+class TestFlattenPredictionRecord:
+    def test_promotes_nested_predicted_vulnerable_to_top_level(self):
+        flat = flatten_prediction_record(PIPELINE_SHAPED_RECORD)
+        assert flat["predicted_vulnerable"] is True
+
+    def test_promotes_nested_cost_usd_to_top_level(self):
+        flat = flatten_prediction_record(PIPELINE_SHAPED_RECORD)
+        assert flat["cost_usd"] == pytest.approx(0.002)
+
+    def test_leaves_already_flat_record_unchanged(self):
+        flat = flatten_prediction_record(BASELINE_SHAPED_RECORD)
+        assert flat["predicted_vulnerable"] is False
+        assert "cost_usd" not in flat  # run_baseline_static.py khong co field nay, khong bia ra
+
+    def test_does_not_mutate_the_original_record(self):
+        original = dict(PIPELINE_SHAPED_RECORD)
+        flatten_prediction_record(PIPELINE_SHAPED_RECORD)
+        assert PIPELINE_SHAPED_RECORD == original
+
+
+def test_confusion_counts_works_correctly_on_run_pipeline_shaped_nested_records():
+    # Truoc khi co flatten_prediction_record: bool(None) = False cho moi record dang nay,
+    # khien TOAN BO record bi tinh nham thanh "khong vulnerable" du predicted that la True.
+    results = [
+        {**PIPELINE_SHAPED_RECORD, "true_vulnerable": True},  # TP
+        {
+            "predicted": {"vulnerable": False},
+            "usage": {"cost_usd": 0.001},
+            "true_vulnerable": False,
+        },  # TN
+    ]
+    counts = confusion_counts(results)
+    assert counts == {"tp": 1, "fp": 0, "fn": 0, "tn": 1}
+
+
+def test_compute_cost_per_1000_snippets_works_on_run_pipeline_shaped_nested_records():
+    results = [
+        {"usage": {"cost_usd": 0.01}},
+        {"usage": {"cost_usd": 0.02}},
+    ]
+    cost = compute_cost_per_1000_snippets(results)
+    assert cost == pytest.approx(15.0)  # 0.03 total / 2 * 1000

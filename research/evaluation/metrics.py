@@ -19,9 +19,36 @@ from collections import defaultdict
 DEFAULT_MIN_SAMPLES_PER_CWE = 5
 
 
+def flatten_prediction_record(record):
+    """Chuan hoa 1 record du doan ve dang PHANG ma cac ham trong module nay can:
+    {predicted_vulnerable, cost_usd, ...}.
+
+    Cac script trong research/evaluation/ KHONG dung chung 1 schema output:
+    - run_baseline_static.py: da phang san (predicted_vulnerable o top-level).
+    - run_pipeline.py / run_llm_naive.py: long nhau (predicted.vulnerable, usage.cost_usd).
+    Neu khong flatten truoc, r.get("predicted_vulnerable")/r.get("cost_usd") tren record long
+    se tra ve None va bi am tham tinh thanh "khong vulnerable" / "chi phi 0" (bool(None) is
+    False, "or 0.0" nuot None) - sai lech ket qua nghien cuu ma KHONG co loi/canh bao nao.
+
+    true_vulnerable/true_cwe (ground truth) KHONG nam trong record cua cac script tren - PHAI
+    duoc noi rieng tu label_human (xem module docstring), ham nay khong dung toi 2 field do.
+    """
+    flat = dict(record)
+    if "predicted_vulnerable" not in flat:
+        predicted = record.get("predicted")
+        if isinstance(predicted, dict):
+            flat["predicted_vulnerable"] = predicted.get("vulnerable", False)
+    if "cost_usd" not in flat:
+        usage = record.get("usage")
+        if isinstance(usage, dict):
+            flat["cost_usd"] = usage.get("cost_usd", 0.0)
+    return flat
+
+
 def confusion_counts(results):
     counts = {"tp": 0, "fp": 0, "fn": 0, "tn": 0}
-    for r in results:
+    for raw in results:
+        r = flatten_prediction_record(raw)
         predicted = bool(r.get("predicted_vulnerable"))
         truth = bool(r.get("true_vulnerable"))
         if predicted and truth:
@@ -75,7 +102,7 @@ def compute_metrics_by_cwe(results, min_samples=DEFAULT_MIN_SAMPLES_PER_CWE):
 
 
 def compute_cost_per_1000_snippets(results):
-    total_cost = sum(r.get("cost_usd") or 0.0 for r in results)
+    total_cost = sum(flatten_prediction_record(r).get("cost_usd") or 0.0 for r in results)
     n = len(results)
     if n == 0:
         return 0.0
@@ -83,7 +110,9 @@ def compute_cost_per_1000_snippets(results):
 
 
 def compute_latency_stats(results):
-    latencies = [r["latency_ms"] for r in results if r.get("latency_ms") is not None]
+    latencies = [
+        v for v in (flatten_prediction_record(r).get("latency_ms") for r in results) if v is not None
+    ]
     if not latencies:
         return {"mean_ms": 0.0, "median_ms": 0.0, "p95_ms": 0.0}
     sorted_latencies = sorted(latencies)
