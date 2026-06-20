@@ -50,9 +50,23 @@ class CodeDetector {
 
   observe(target = this.document.body) {
     if (!target) return;
-    this.observer = new MutationObserver(() => this.scan());
+    this.observer = new MutationObserver((mutations) => {
+      // Bo qua mutation chi do chinh extension tu chen badge canh bao (injector.js) -
+      // neu khong, moi lan inject 1 badge se tu kich hoat scan() quet lai TOAN BO DOM,
+      // gay O(n) lan quet thua cho n code block tren trang (lang phi CPU).
+      const hasNonBadgeMutation = mutations.some((mutation) => (
+        Array.from(mutation.addedNodes).some((node) => !CodeDetector.isOwnBadge(node))
+      ));
+      if (hasNonBadgeMutation) {
+        this.scan();
+      }
+    });
     this.observer.observe(target, { childList: true, subtree: true });
     this.scan();
+  }
+
+  static isOwnBadge(node) {
+    return Boolean(node && node.nodeType === 1 && node.hasAttribute && node.hasAttribute('data-llm-safety-badge'));
   }
 
   disconnect() {

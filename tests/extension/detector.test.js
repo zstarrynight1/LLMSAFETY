@@ -98,3 +98,94 @@ describe('CodeDetector', () => {
     expect(onCodeBlocksFound.mock.calls[0][0]).toHaveLength(1);
   });
 });
+
+function flushMutations() {
+  return new Promise((resolve) => { setTimeout(resolve, 0); });
+}
+
+describe('CodeDetector.observe() — mutation filtering (tranh tu kich hoat quet lai)', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  test('observe() runs an initial scan synchronously', () => {
+    buildStackOverflowDom();
+    const onCodeBlocksFound = jest.fn();
+    const detector = new CodeDetector({
+      document,
+      location: { hostname: 'stackoverflow.com', href: 'https://stackoverflow.com' },
+      onCodeBlocksFound,
+    });
+
+    detector.observe();
+
+    expect(onCodeBlocksFound).toHaveBeenCalledTimes(1);
+    detector.disconnect();
+  });
+
+  test('inserting a real (non-badge) code block triggers a rescan that finds it', async () => {
+    const onCodeBlocksFound = jest.fn();
+    const detector = new CodeDetector({
+      document,
+      location: { hostname: 'github.com', href: 'https://github.com' },
+      onCodeBlocksFound,
+    });
+    detector.observe();
+    onCodeBlocksFound.mockClear();
+
+    const pre = document.createElement('pre');
+    pre.innerHTML = '<code>import os\nos.system(user_input)</code>';
+    document.body.appendChild(pre);
+    await flushMutations();
+
+    expect(onCodeBlocksFound).toHaveBeenCalledTimes(1);
+    detector.disconnect();
+  });
+
+  test('inserting the extension own warning badge does NOT trigger a rescan (avoids O(n) self-triggered re-scans)', async () => {
+    const onCodeBlocksFound = jest.fn();
+    const detector = new CodeDetector({
+      document,
+      location: { hostname: 'github.com', href: 'https://github.com' },
+      onCodeBlocksFound,
+    });
+    detector.observe();
+    onCodeBlocksFound.mockClear();
+    const querySpy = jest.spyOn(document, 'querySelectorAll').mockClear();
+
+    const badge = document.createElement('div');
+    badge.setAttribute('data-llm-safety-badge', 'true');
+    document.body.appendChild(badge);
+    await flushMutations();
+
+    expect(querySpy).not.toHaveBeenCalled(); // scan() khong chay lai cho mutation cua chinh minh
+    expect(onCodeBlocksFound).not.toHaveBeenCalled();
+
+    detector.disconnect();
+    querySpy.mockRestore();
+  });
+
+  test('a mutation that mixes a real code block AND a badge still triggers exactly one rescan', async () => {
+    const onCodeBlocksFound = jest.fn();
+    const detector = new CodeDetector({
+      document,
+      location: { hostname: 'github.com', href: 'https://github.com' },
+      onCodeBlocksFound,
+    });
+    detector.observe();
+    onCodeBlocksFound.mockClear();
+
+    const fragment = document.createDocumentFragment();
+    const pre = document.createElement('pre');
+    pre.innerHTML = '<code>eval(userInput)</code>';
+    const badge = document.createElement('div');
+    badge.setAttribute('data-llm-safety-badge', 'true');
+    fragment.appendChild(pre);
+    fragment.appendChild(badge);
+    document.body.appendChild(fragment);
+    await flushMutations();
+
+    expect(onCodeBlocksFound).toHaveBeenCalledTimes(1);
+    detector.disconnect();
+  });
+});
