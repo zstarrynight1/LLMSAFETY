@@ -7,6 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "research" / "data-
 
 from label_snippets import (  # noqa: E402
     label_snippet,
+    label_snippets_to_file,
     load_snippets,
     run_bandit,
     run_semgrep,
@@ -106,6 +107,39 @@ def test_load_snippets_and_save_labels_roundtrip(tmp_path):
     save_labels(loaded, output_path)
     lines = output_path.read_text(encoding="utf-8").strip().split("\n")
     assert len(lines) == len(SAMPLE_SNIPPETS)
+
+
+def test_label_snippets_to_file_writes_one_label_per_snippet_immediately(tmp_path):
+    # Khong giu het ket qua trong RAM roi moi luu cuoi - dong nhat voi run_pipeline.py/
+    # run_llm_naive.py, tranh mat tien do neu crash giua dataset lon.
+    output_path = tmp_path / "labels.jsonl"
+
+    labels = label_snippets_to_file(
+        SAMPLE_SNIPPETS, output_path,
+        bandit_runner=fake_runner({"results": []}), semgrep_runner=fake_runner({"results": []}),
+        save_every=2, print_fn=lambda _: None,
+    )
+
+    assert len(labels) == len(SAMPLE_SNIPPETS)
+    lines = output_path.read_text(encoding="utf-8").strip().split("\n")
+    assert len(lines) == len(SAMPLE_SNIPPETS)
+    assert json.loads(lines[0])["question_id"] == 1
+    assert json.loads(lines[0])["label_human"] is None
+
+
+def test_label_snippets_to_file_flushes_after_every_snippet_not_only_at_save_every_checkpoint(tmp_path):
+    output_path = tmp_path / "labels.jsonl"
+
+    label_snippets_to_file(
+        SAMPLE_SNIPPETS[:2], output_path,
+        bandit_runner=fake_runner({"results": []}), semgrep_runner=fake_runner({"results": []}),
+        save_every=10,  # lon hon so luong snippet - vi du nay xac nhan van flush tung dong
+        print_fn=lambda _: None,
+    )
+
+    # File da co du 2 dong ngay khi ham return (da flush, khong phai chi nam trong RAM cho toi cuoi).
+    lines = output_path.read_text(encoding="utf-8").strip().split("\n")
+    assert len(lines) == 2
 
 
 def test_sample_for_human_review_is_deterministic_given_a_seed_and_respects_size_cap():

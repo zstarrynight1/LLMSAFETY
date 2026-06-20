@@ -114,6 +114,28 @@ def save_labels(labels, output_path):
             f.write(json.dumps(label, ensure_ascii=False) + "\n")
 
 
+def label_snippets_to_file(
+    snippets, output_path, bandit_runner=subprocess.run, semgrep_runner=subprocess.run,
+    save_every=10, print_fn=print,
+):
+    """Gan nhan VA ghi ra file NGAY SAU MOI snippet - khong tinh het roi moi luu cuoi cung.
+    Dong nhat voi run_pipeline.py/run_llm_naive.py (research/evaluation/): moi snippet chay
+    1-2 subprocess (bandit/semgrep, timeout 60s/lan) nen thoi gian chay ty le voi kich thuoc
+    dataset - crash/Ctrl-C/timeout giua chung se khong mat toan bo tien do da gan nhan."""
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    labels = []
+    with output_path.open("w", encoding="utf-8") as f:
+        for i, snippet in enumerate(snippets, start=1):
+            label = label_snippet(snippet, bandit_runner=bandit_runner, semgrep_runner=semgrep_runner)
+            f.write(json.dumps(label, ensure_ascii=False) + "\n")
+            f.flush()
+            labels.append(label)
+            if i % save_every == 0:
+                print_fn(f"Da gan nhan {i}/{len(snippets)} snippet...")
+    return labels
+
+
 def sample_for_human_review(labels, sample_size, seed=42):
     """Chon mau ngau nhien (50-150 theo RESEARCH_PLAN.md muc 3.2) de human-verify thu cong."""
     rng = random.Random(seed)
@@ -131,8 +153,7 @@ def main():
     args = parser.parse_args()
 
     snippets = load_snippets(args.input)
-    labels = [label_snippet(s) for s in snippets]
-    save_labels(labels, args.output)
+    labels = label_snippets_to_file(snippets, args.output)
     print(f"Da gan nhan {len(labels)} snippet, luu vao {args.output}")
 
     if args.human_sample_size > 0:
