@@ -50,14 +50,19 @@ class SchemaValidationError extends Error {
   }
 }
 
+const utilsExports = {
+  sha256Hash,
+  truncateText,
+  formatErrorForLog,
+  ValidationError,
+  APITimeoutError,
+  APIRateLimitError,
+  SchemaValidationError,
+};
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = {
-    sha256Hash,
-    truncateText,
-    formatErrorForLog,
-    ValidationError,
-    APITimeoutError,
-    APIRateLimitError,
-    SchemaValidationError,
-  };
+  module.exports = utilsExports;
+} else if (typeof globalThis !== 'undefined') {
+  globalThis.SafetyExt = globalThis.SafetyExt || {};
+  Object.assign(globalThis.SafetyExt, utilsExports);
 }

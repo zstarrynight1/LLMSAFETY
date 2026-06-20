@@ -20,8 +20,6 @@
         "https://*.github.com/*"
       ],
       "js": [
-        "src/shared/constants.js",
-        "src/shared/utils.js",
         "src/content/injector.js",
         "src/content/detector.js"
       ],

@@ -25,16 +25,24 @@ const SUPPORTED_DOMAINS = Object.freeze(['stackoverflow.com', 'github.com']);
 
 const DEBUG_MODE = false; // bat thu cong khi dev, PHAI tat khi build production
 
+const constantsExports = {
+  CWE_TAXONOMY,
+  MAX_PROMPT_LENGTH,
+  TIMEOUT_MS,
+  MAX_RETRY_COUNT,
+  CACHE_TTL_MS,
+  MAX_DAILY_API_CALLS,
+  MAX_DAILY_COST_USD,
+  SUPPORTED_DOMAINS,
+  DEBUG_MODE,
+};
+
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = {
-    CWE_TAXONOMY,
-    MAX_PROMPT_LENGTH,
-    TIMEOUT_MS,
-    MAX_RETRY_COUNT,
-    CACHE_TTL_MS,
-    MAX_DAILY_API_CALLS,
-    MAX_DAILY_COST_USD,
-    SUPPORTED_DOMAINS,
-    DEBUG_MODE,
-  };
+  // Node/Jest: moi file la 1 CommonJS module rieng, dung require() de lay.
+  module.exports = constantsExports;
+} else if (typeof globalThis !== 'undefined') {
+  // Browser (content script nhieu file / service worker importScripts):
+  // gan vao namespace chung de cac file khac doc duoc, khong dua vao lexical scope ngam dinh.
+  globalThis.SafetyExt = globalThis.SafetyExt || {};
+  Object.assign(globalThis.SafetyExt, constantsExports);
 }
